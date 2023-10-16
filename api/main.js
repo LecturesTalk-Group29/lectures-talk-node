@@ -1,45 +1,18 @@
 const express = require('express');
-const app = express({ caseSensitive: false });
+const app = express();
 const axios = require('axios');
-const cors = require('cors');
-require('dotenv').config(); // Load environment variables from .env file.
 const { MongoClient } = require('mongodb');
+
+
 
 // Replace with your OpenAI key and MongoDB URL.
 const openai_key = process.env.OPENAI_KEY;
 const mongoURL = process.env.MONGO_URL;
 app.use(express.json());
-app.use(cors());
-// Define your functions here (getEmbedding, createEmbedding, findSimilarDocuments, uploadDoc).
-async function getEmbedding(query) {
-
-    console.log("query: ", query)
-
-    // Define the OpenAI API url and key.
-    const url = 'https://api.openai.com/v1/embeddings';
-    const openai_key = process.env.OPENAI_KEY;
-    
-    // Call OpenAI API to get the embeddings.
-    let response = await axios.post(url, {
-        input: query,
-        model: "text-embedding-ada-002"
-    }, {
-        headers: {
-            'Authorization': `Bearer ${openai_key}`,
-            'Content-Type': 'application/json'
-        }
-    });
-    
-    if(response.status === 200) {
-        const [{embedding}] = response.data?.data
-        //console.log('embedding', embedding)
-        return embedding
-    } else {
-        throw new Error(`Failed to get embedding. Status code: ${response.status}`);
-    }
-}
 
 
+
+  
 async function createEmbedding(text){ //function to take in any text and sends it to the openai embedding ada 002 model to return embeddings
     const url = 'https://api.openai.com/v1/embeddings';
     const openai_key = process.env.OPENAI_KEY; // Replace with your OpenAI key.
@@ -91,8 +64,11 @@ async function findSimilarDocuments(embedding) {
             },
         ]).toArray()
 
-        return documents
-        
+        return documents[0] // will fix later, just a lazy way to get highest metascore for the time being
+
+    }catch{
+        const returnNoDoc = "No Context given"
+        return returnNoDoc
     } finally {
         await client.close();
     }
@@ -117,34 +93,41 @@ async function uploadDoc(docTextI){
     console.log("inserted")
 }
 
-
-// ERIC, it was GET I changed it to POST
-// Anythere we add something to the body its POST 
-// Define an API endpoint to get embeddings.
-app.post('/api/getEmbedding', async (req, res) => {
-    const query = req.body.query; // Query parameter from the request.
-    try {
-        const embedding = await getEmbedding(query);
-        res.json({ embedding });
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to get embedding' });
+app.post('/api/queryGPT', async (req, res) => {
+    const {query } = req.body;
+    const messageEmbeddings = await createEmbedding(query)
+    const similarDocuments = await findSimilarDocuments(messageEmbeddings)
+    const releveantInfo = similarDocuments
+ 
+    const gptPrompt = "Based on " + releveantInfo + " and your knowledge, " + query;
+    if (!query) {
+      return res.status(400).json({ error: 'Message is required in the request body' });
     }
-});
-
-// Define an API endpoint to find similar documents.
-app.get('/api/findSimilarDocuments', async (req, res) => {
-    const query = req.body.text;
-    const embedding = await createEmbedding(query); // Query parameter from the request.
-    console.log("embedding created", embedding)
+  
     try {
-        const documents = await findSimilarDocuments(embedding);
-        
-        res.json({ documents });
+      const apiKey = process.env.OPENAI_KEY;
+      const endpoint = 'https://api.openai.com/v1/chat/completions';
+  
+      const response = await axios.post(endpoint, {
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: gptPrompt }],
+        temperature: 0.7,
+      }, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+  
+      const content = response.data.choices[0].message.content;
+      res.json({content});
     } catch (error) {
-        res.status(500).json({ error: 'Failed to find similar documents' });
+      console.error('Error:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
     }
-});
-
+  });
+  
+  
 // Define an API endpoint to upload a document.
 app.post('/api/uploadDoc', async (req, res) => {
     const docText = req.body.text; // Text from the request body.
@@ -157,22 +140,8 @@ app.post('/api/uploadDoc', async (req, res) => {
     }
 });
 
-app.post('/api/chatTestEcho', (req, res) => {
-    const { query } = req.body; // Extract the query property from the incoming JSON
-  
-    // Check if query property exists
-    if (typeof query !== 'undefined') {
-      setTimeout(() => {
-        // res.json({ response: query });
-        res.json({ response: "stfu you stupid dum dum" });
-      }, 3000);
-    } else {
-      res.status(400).send('Bad Request: Missing query property in request body');
-    }
-  });
-
 // Start the Express server.
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 3000;
 app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
+    console.log(`Server is running on port ${port}`);
 });

@@ -1,6 +1,7 @@
 const express = require('express');
 const app = express();
 const axios = require('axios');
+require('dotenv').config(); // Load environment variables from .env file.
 const { MongoClient } = require('mongodb');
 
 // Replace with your OpenAI key and MongoDB URL.
@@ -9,6 +10,9 @@ const mongoURL = process.env.MONGO_URL;
 app.use(express.json());
 // Define your functions here (getEmbedding, createEmbedding, findSimilarDocuments, uploadDoc).
 async function getEmbedding(query) {
+
+    console.log("query: ", query)
+
     // Define the OpenAI API url and key.
     const url = 'https://api.openai.com/v1/embeddings';
     const openai_key = process.env.OPENAI_KEY;
@@ -115,7 +119,7 @@ async function uploadDoc(docTextI){
 
 // Define an API endpoint to get embeddings.
 app.get('/api/getEmbedding', async (req, res) => {
-    const query = req.query.query; // Query parameter from the request.
+    const query = req.body.query; // Query parameter from the request.
     try {
         const embedding = await getEmbedding(query);
         res.json({ embedding });
@@ -151,7 +155,7 @@ app.post('/api/uploadDoc', async (req, res) => {
 });
 
 // Start the Express server.
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000;
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
 });

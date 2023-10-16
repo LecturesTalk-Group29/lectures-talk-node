@@ -1,6 +1,7 @@
 const express = require('express');
-const app = express();
+const app = express({ caseSensitive: false });
 const axios = require('axios');
+const cors = require('cors');
 require('dotenv').config(); // Load environment variables from .env file.
 const { MongoClient } = require('mongodb');
 
@@ -8,6 +9,7 @@ const { MongoClient } = require('mongodb');
 const openai_key = process.env.OPENAI_KEY;
 const mongoURL = process.env.MONGO_URL;
 app.use(express.json());
+app.use(cors());
 // Define your functions here (getEmbedding, createEmbedding, findSimilarDocuments, uploadDoc).
 async function getEmbedding(query) {
 
@@ -116,9 +118,10 @@ async function uploadDoc(docTextI){
 }
 
 
-
+// ERIC, it was GET I changed it to POST
+// Anythere we add something to the body its POST 
 // Define an API endpoint to get embeddings.
-app.get('/api/getEmbedding', async (req, res) => {
+app.post('/api/getEmbedding', async (req, res) => {
     const query = req.body.query; // Query parameter from the request.
     try {
         const embedding = await getEmbedding(query);
@@ -154,8 +157,22 @@ app.post('/api/uploadDoc', async (req, res) => {
     }
 });
 
+app.post('/api/chatTestEcho', (req, res) => {
+    const { query } = req.body; // Extract the query property from the incoming JSON
+  
+    // Check if query property exists
+    if (typeof query !== 'undefined') {
+      setTimeout(() => {
+        // res.json({ response: query });
+        res.json({ response: "stfu you stupid dum dum" });
+      }, 3000);
+    } else {
+      res.status(400).send('Bad Request: Missing query property in request body');
+    }
+  });
+
 // Start the Express server.
 const port = process.env.PORT || 5000;
 app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+    console.log(`Server is running on http://localhost:${port}`);
 });

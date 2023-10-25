@@ -4,6 +4,7 @@ const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config(); // Load environment variables from .env file.
 const { MongoClient } = require('mongodb');
+const { ObjectId } = require('mongodb');
 
 
 app.use(express.json());
@@ -90,6 +91,62 @@ async function uploadDoc(docTextI) {
     console.log("inserted")
 }
 
+
+async function summarizeGPT(query) {
+    try {
+      if (!query) {
+        throw new Error('Message is required in the request body');
+      }
+      const instructions = `
+    I am going to be feeding you some blocks of text from a lecture in the format of: start time : text, 
+    summarize all of it. Use passive voice, respond with summary only, no preamble or postambl
+`;
+      const gptPrompt =instructions  + query;
+  
+      const apiKey = process.env.OPENAI_KEY;
+      const endpoint = 'https://api.openai.com/v1/chat/completions';
+  
+      const response = await axios.post(endpoint, {
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: gptPrompt }],
+        temperature: 0.9,
+      }, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+  
+      const content = response.data.choices[0].message.content;
+      return content;
+    } catch (error) {
+      console.error('Error:', error);
+      throw error;
+    }
+  }
+
+  function chunkArray(array, chunkSize) {
+    const chunks = [];
+    for (let i = 0; i < array.length; i += chunkSize) {
+      chunks.push(array.slice(i, i + chunkSize));
+    }
+    return chunks;
+  }
+
+
+  let summaryIdCounter = 0;
+
+  function createSummaryWithTimestamps(firstTimestamp, lastTimestamp, text) {
+    const id = summaryIdCounter;
+    summaryIdCounter++;
+    return {
+      id: id,
+      start: firstTimestamp,
+      end: lastTimestamp,
+      text: text,
+    };
+  }
+
 //Endpoint that gets User's text and returns context-aware AI responce
 //Accepts: {"query": "Some chat question"}
 //Returns: {"content": "Some AI answer"}
@@ -151,6 +208,84 @@ app.post('/api/uploadDoc', async (req, res) => {
         res.status(500).json({ error: 'Failed to upload document' });
     }
 });
+
+//Endpoint to summarize doc
+app.get('/api/summarize/:docID', async (req, res) => {
+    let client;
+    try {
+      const url = process.env.MONGO_URL;
+      const collectionName = 'videos';
+      const documentId = req.params.docID;
+  
+      const objectId = new ObjectId(documentId);
+  
+      client = new MongoClient(url);
+      await client.connect();
+      console.log('Connected');
+  
+      const db = client.db('lectures_talk');
+      const collection = db.collection(collectionName);
+  
+      const document = await collection.findOne({ _id: objectId });
+  
+      if (!document) {
+        throw new Error('Document not found');
+      }
+      console.log('Document retrieved');
+  
+      const segments = document.segments;
+      const summaries = [];
+  
+      let block = [];
+      let firstTimestamp = null; // Store the first timestamp in the block
+  
+      for (const segment of segments) {
+        const { text, start } = segment;
+  
+        // If the block is empty, set the first timestamp
+        if (block.length === 0) {
+          firstTimestamp = start;
+        }
+  
+        block.push(`${start}: ${text}`);
+  
+        if (block.length >= 40) {
+          const summaryText = await summarizeGPT(block.join('\n'));
+          const lastTimestamp = segment.start; // Store the last timestamp in the block
+          summaries.push(createSummaryWithTimestamps(firstTimestamp, lastTimestamp, summaryText));
+          console.log(summaries)
+          block = []; // Reset the block
+        }
+      }
+  
+      // If there are remaining segments in the block, summarize them
+      if (block.length > 0) {
+        const summaryText = await summarizeGPT(block.join('\n'));
+        const lastTimestamp = segments[segments.length - 1].start;
+        summaries.push(createSummaryWithTimestamps(firstTimestamp, lastTimestamp, summaryText));
+      }
+
+/*  commeted out for now because i dont want to mess with the database, this will update the document with the fields "lectureSegments"
+      await collection.updateOne(
+        { _id: objectId },
+        {
+          $set: {
+            lectureSegments: summaries,
+          },
+        }
+      );
+      */
+      res.json({ summaries });
+    } catch (error) {
+      console.error('Error:', error);
+      res.status(500).json({ error: 'An error occurred' });
+    } finally {
+      if (client) {
+        client.close();
+      }
+    }
+  });
+  
 
 // Start the Express server.
 const port = process.env.PORT || 5000;
